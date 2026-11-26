@@ -79,5 +79,40 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 按授权地区领用金记录（受控分发清单）
+
+在「下游订阅方」页顶部的 **按授权地区领用金记录 · 受控分发清单** 工作台完成，
+「金记录发布」页每行有 **领用历史**，并内嵌发布数据查询/归属调整。
+
+业务规则（由 `app/services/controlled_distribution.py` 服务端判定）：
+
+- 领用必须指定 **收件主体（订阅方）+ 发布批次/版本 + 地区范围**，先预览再确认领取。
+- 只有 **订阅了对应实体** 且 **持有该行归属地区有效授权** 的收件方，该行才可交付；
+  未订阅实体 / 无该地区授权（含授权已撤销）分别给出拒绝原因。
+- **归属地区无法识别的行一律拒绝，不会被当成共享行放行**。
+- 确认后生成唯一 **确认单号 + 清单编号**，冻结唯一一版发布与一份清单（行内容、归属依据、
+  权限来源/授权单号均入快照）；断点后用同一确认「继续领取」，重复下载同一确认 **只产生一次派送**。
+- 地区授权的授予/撤销全程留痕，`撤销时间(reported as 撤销时间 / revoked_at)` 即权限撤去时点。
+- 发布端 **领用历史** 按版本汇总交付单、被拒绝项与派送记录，均可核对到同一订阅方。
+
+主要接口（同时挂在 `/api/distribution`、`/api/claims`、`/api/region-grants` 等别名下）：
+
+```text
+GET  /api/controlled-distribution/meta
+GET  /api/controlled-distribution/published-rows   # 发布数据查询/筛选+资格判定
+POST /api/controlled-distribution/preview          # 预览受控分发清单（返回 preview_id）
+POST /api/controlled-distribution/claims           # 确认领取（可带 preview_id 计算变化影响）
+GET  /api/controlled-distribution/claims[/{code}]
+POST /api/controlled-distribution/claims/{code}/continue
+GET  /api/controlled-distribution/claims/{code}/download[?format=json]
+GET/POST /api/controlled-distribution/grants       # 地区授权/撤销（留撤销时点）
+POST .../published-rows/{id}/attribution           # 管理员调整数据归属
+GET  /api/golden_publish/{id}/claim-history        # 发布版本的交付单+被拒绝项
+```
+
+内置剧本数据：订阅方 **采购程序**（订阅实体「客户」，持北区授权，另有一条已撤销的西区授权）、
+发布版本 `v-customer-2026q3` 的 8 条客户行（含 1 条地区无法识别行），以及一份
+**尚未领取的「北区客户交付」** 确认单 `CONF-PROC-BEI-0001`（清单 `MAN-PROC-BEI-0001`，3 行）。
+
 领域：数据工程
 子方向：数仓与数据湖

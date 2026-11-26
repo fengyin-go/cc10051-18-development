@@ -22,6 +22,11 @@ from app.services.dist_receipt import DistReceiptService
 from app.services.model_change import ModelChangeService
 from app.services.stats_overview import StatsOverviewService
 from app.services.ref_data_mgr import RefDataMgrService
+from app.services.published_row import (
+    GoldenRecordAdapter,
+    PublishDataAdapter,
+    PublishedRowService,
+)
 
 SERVICES: dict[str, BaseModuleService] = {
     "source_system": SourceSystemService(),
@@ -44,6 +49,10 @@ SERVICES: dict[str, BaseModuleService] = {
     "model_change": ModelChangeService(),
     "stats_overview": StatsOverviewService(),
     "ref_data_mgr": RefDataMgrService(),
+    # 受控分发所用发布数据的只读/动作适配器（别名模块键）。
+    "published_row": PublishedRowService(),
+    "golden_record": GoldenRecordAdapter(),
+    "publish_data": PublishDataAdapter(),
 }
 
 

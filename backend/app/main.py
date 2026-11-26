@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import ROUTERS
+from app.routers import ROUTERS, distribution
 from app.store import store
 
 app = FastAPI(title="主数据治理与参考数据管理平台", version="1.0.0")
@@ -21,6 +21,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 受控分发（按授权地区领用）的固定路径接口先于 /api/{module} 动态资源路由注册，
+# 避免被通用资源路由抢先匹配。
+app.include_router(distribution.router)
 
 @app.get("/api/health")
 def health() -> dict[str, object]:

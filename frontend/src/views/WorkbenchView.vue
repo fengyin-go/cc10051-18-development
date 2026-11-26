@@ -15,6 +15,11 @@
       </div>
     </header>
 
+    <ControlledClaimPanel
+      v-if="meta.key === 'subscriber_mgr'"
+      ref="claimPanelRef"
+    />
+
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
@@ -60,6 +65,33 @@
             >
               {{ action }}
             </button>
+            <button
+              v-if="meta.key === 'subscriber_mgr'"
+              class="link"
+              type="button"
+              :data-testid="`action-${row.id}-按地区领用`"
+              @click="startClaimFor(row)"
+            >
+              按地区领用
+            </button>
+            <button
+              v-if="meta.key === 'subscriber_mgr'"
+              class="link"
+              type="button"
+              :data-testid="`action-${row.id}-地区授权`"
+              @click="startClaimFor(row, true)"
+            >
+              地区授权
+            </button>
+            <button
+              v-if="meta.key === 'golden_publish'"
+              class="link"
+              type="button"
+              :data-testid="`action-${row.id}-领用历史`"
+              @click="historyBatchId = row.id"
+            >
+              领用历史
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -86,6 +118,17 @@
       </form>
     </div>
 
+    <PublishHistoryPanel
+      v-if="meta.key === 'golden_publish'"
+      :batch-id="historyBatchId"
+      @close="historyBatchId = null"
+    />
+
+    <PublishedExplorer
+      v-if="meta.key === 'golden_publish'"
+      title="发布数据查询与筛选 · 归属依据 / 管理员调整数据归属"
+    />
+
     <footer class="page-foot">
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -94,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import {
   createEntry,
@@ -103,32 +146,43 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/backend-service'
+import ControlledClaimPanel from '@/components/ControlledClaimPanel.vue'
+import PublishHistoryPanel from '@/components/PublishHistoryPanel.vue'
+import PublishedExplorer from '@/components/PublishedExplorer.vue'
 import type { EntryRow } from '@/data/types'
+import { useRoute } from 'vue-router'
 
 const props = defineProps<{ moduleKey: string }>()
-const meta = moduleMeta(props.moduleKey)
+const route = useRoute()
+const meta = computed(() => moduleMeta(props.moduleKey))
+const claimPanelRef = ref<InstanceType<typeof ControlledClaimPanel> | null>(null)
+const historyBatchId = ref<number | string | null>(null)
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
-const filterFields = meta.fields.slice(0, 3)
+const filterFields = computed(() => meta.value.fields.slice(0, 3))
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
 const stats = computed(() => [
-  { label: meta.metrics[0], value: total.value },
-  { label: meta.metrics[1], value: rows.value.filter((row) => row.status === meta.statuses[1]).length },
+  { label: meta.value.metrics[0], value: total.value },
+  { label: meta.value.metrics[1], value: rows.value.filter((row) => row.status === meta.value.statuses[1]).length },
   {
-    label: meta.metrics[2],
-    value: rows.value.filter((row) => row.status === meta.statuses[meta.statuses.length - 1]).length,
+    label: meta.value.metrics[2],
+    value: rows.value.filter((row) => row.status === meta.value.statuses[meta.value.statuses.length - 1]).length,
   },
 ])
 const statusSummary = computed(() =>
-  meta.statuses.map((status) => ({
+  meta.value.statuses.map((status) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+function startClaimFor(row: EntryRow, focusGrant = false) {
+  claimPanelRef.value?.startForSubscriber(row.id, focusGrant)
+}
 
 function resetFilters() {
   filters.value = {}
@@ -138,14 +192,14 @@ function resetFilters() {
 async function exportRows() {
   errorMessage.value = ''
   try {
-    await downloadEntries(meta.key, filters.value)
+    await downloadEntries(meta.value.key, filters.value)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '导出失败'
   }
 }
 
 function openCreate() {
-  createValues.value = Object.fromEntries(meta.fields.map((field) => [field, '']))
+  createValues.value = Object.fromEntries(meta.value.fields.map((field) => [field, '']))
   errorMessage.value = ''
   showCreate.value = true
 }
@@ -154,10 +208,11 @@ async function submitCreate() {
   creating.value = true
   errorMessage.value = ''
   try {
-    const result = await createEntry(meta.key, createValues.value)
+    const result = await createEntry(meta.value.key, createValues.value)
     if (!result.ok) throw new Error(result.message)
     showCreate.value = false
     await reload()
+    if (meta.value.key === 'subscriber_mgr') await claimPanelRef.value?.refreshMeta?.()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '登记失败'
   } finally {
@@ -168,7 +223,7 @@ async function submitCreate() {
 async function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
   try {
-    const result = await applyAction(meta.key, Number(row.id), action)
+    const result = await applyAction(meta.value.key, Number(row.id), action)
     if (!result.ok) throw new Error(result.message)
     await reload()
   } catch (error) {
@@ -179,7 +234,7 @@ async function runAction(action: string, row: EntryRow) {
 async function reload() {
   errorMessage.value = ''
   try {
-    const payload = await listEntries(meta.key, filters.value)
+    const payload = await listEntries(meta.value.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
   } catch (error) {
@@ -187,5 +242,19 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+watch(() => props.moduleKey, () => {
+  filters.value = {}
+  showCreate.value = false
+  historyBatchId.value = null
+  void reload()
+})
+
+onMounted(async () => {
+  await reload()
+  // 支持直达链接 ?history=4 自动打开该发布版本的领用历史。
+  if (meta.value.key === 'golden_publish') {
+    const h = route.query.history ?? route.query.claim_history ?? route.query.batch
+    if (h !== undefined && h !== '') historyBatchId.value = String(Array.isArray(h) ? h[0] : h)
+  }
+})
 </script>
